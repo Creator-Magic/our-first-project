@@ -1,0 +1,130 @@
+---
+name: Issue Moderation
+
+"on":
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
+
+jobs:
+  moderate:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+      metadata: read
+
+    steps:
+      - name: Check team membership and moderate
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Configuration: Define the teams that are allowed to create issues
+            // You can modify this list to include your organization's team slugs
+            const allowedTeams = [
+              'core-team',
+              'maintainers',
+              'admins'
+            ];
+
+            // Get the organization name from the repository
+            const org = context.repo.owner;
+
+            async function isUserInAllowedTeams(username) {
+              try {
+                // Check if user is a member of any allowed team
+                for (const teamSlug of allowedTeams) {
+                  try {
+                    await github.rest.teams.getMembershipForUserInOrg({
+                      org: org,
+                      team_slug: teamSlug,
+                      username: username
+                    });
+                    const msg = `User ${username} is a member of team ${teamSlug}`;
+                    console.log(msg);
+                    return true;
+                  } catch (error) {
+                    // User is not in this team, continue checking other teams
+                    const msg = `User ${username} is not in team ${teamSlug}`;
+                    console.log(msg);
+                  }
+                }
+                return false;
+              } catch (error) {
+                const msg = `Error checking team membership for ${username}:`;
+                console.error(msg, error);
+                return false;
+              }
+            }
+
+            // Handle issue opened event
+            const eventName = context.eventName;
+            const action = context.payload.action;
+            if (eventName === 'issues' && action === 'opened') {
+              const issue = context.payload.issue;
+              const issueAuthor = issue.user.login;
+
+              const msg1 = `Checking issue #${issue.number} created by ${issueAuthor}`;
+              console.log(msg1);
+
+              const isAuthorInTeam = await isUserInAllowedTeams(issueAuthor);
+
+              if (!isAuthorInTeam) {
+                const msg2 = `Issue author ${issueAuthor} is not in any allowed team. Closing issue.`;
+                console.log(msg2);
+
+                // Add a comment explaining why the issue is being closed
+                const body = '🤖 This issue has been automatically closed because it was not created by a member of an authorized team. Only team members can create issues in this repository.';
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: body
+                });
+
+                // Close the issue
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  state: 'closed',
+                  state_reason: 'not_planned'
+                });
+
+                console.log(`Issue #${issue.number} has been closed.`);
+              } else {
+                const msg3 = `Issue author ${issueAuthor} is authorized. Issue will remain open.`;
+                console.log(msg3);
+              }
+            }
+
+            // Handle issue comment event
+            if (eventName === 'issue_comment' && action === 'created') {
+              const comment = context.payload.comment;
+              const commentAuthor = comment.user.login;
+              const issue = context.payload.issue;
+
+              const msg4 = `Checking comment by ${commentAuthor} on issue #${issue.number}`;
+              console.log(msg4);
+
+              const isAuthorInTeam = await isUserInAllowedTeams(commentAuthor);
+
+              if (!isAuthorInTeam) {
+                const msg5 = `Comment author ${commentAuthor} is not in any allowed team. Deleting comment.`;
+                console.log(msg5);
+
+                // Delete the comment
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: comment.id
+                });
+
+                const msg6 = `Comment ${comment.id} by ${commentAuthor} has been deleted.`;
+                console.log(msg6);
+              } else {
+                const msg7 = `Comment author ${commentAuthor} is authorized. Comment will remain.`;
+                console.log(msg7);
+              }
+            }
