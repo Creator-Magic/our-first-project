@@ -23,9 +23,8 @@ jobs:
             // Configuration: Define the teams that are allowed to create issues
             // You can modify this list to include your organization's team slugs
             const allowedTeams = [
-              'core-team',
-              'maintainers',
-              'admins'
+              'creator-magic-admin-team',
+              'premium-team'
             ];
 
             // Get the organization name from the repository
